@@ -1,0 +1,6 @@
+package: .
+import:
+- package: github.com/google/go-github
+  version: ^15.0.0
+  subpackages:
+  - github
