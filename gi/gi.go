@@ -6,6 +6,9 @@ import (
 	"gopkg.in/src-d/go-git.v4"
 	"errors"
 	"strings"
+	"gopkg.in/src-d/go-billy.v4/helper/chroot"
+	"gopkg.in/src-d/go-git.v4/storage/filesystem"
+	"path"
 )
 
 type Gi struct {
@@ -17,6 +20,7 @@ var (
 	ErrNoRemote             = errors.New("no remote found")
 )
 
+// Instantiate Gi from working directory
 func GetGitWd() *Gi {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -26,6 +30,7 @@ func GetGitWd() *Gi {
 	return GetGit(dir)
 }
 
+// Instantiate Gi from path
 func GetGit(path string) *Gi {
 	r, err := git.PlainOpen(path)
 	if err == git.ErrRepositoryNotExists {
@@ -39,8 +44,26 @@ func GetGit(path string) *Gi {
 	return &Gi{*r}
 }
 
-
+// Attempts to retrieve the git parent directory
+// Falls back to prettified remote name
 func (g Gi) GetProjectName() (string, error) {
+	// Try to grab the repository Storer
+	s, ok := g.Storer.(*filesystem.Storage)
+	if !ok {
+		return g.getRemoteName()
+	}
+
+	// Try to get the underlying billy.Filesystem
+	fs, ok := s.Filesystem().(*chroot.ChrootHelper)
+	if !ok {
+		return g.getRemoteName()
+	}
+	name := path.Base(path.Dir(fs.Root()))
+	return name, nil
+}
+
+// Attempts to retrieve a remote name
+func (g Gi) getRemoteName() (string, error) {
 	remotes, err := g.Remotes()
 	if err != nil {
 		return "", err
@@ -56,10 +79,11 @@ func (g Gi) GetProjectName() (string, error) {
 	}
 }
 
+// Trim url to get last segment before extensions
 func nameFromUrl(url string) string {
 	slash := strings.LastIndex(url, "/")
 	if slash > 0 {
-		url = url[slash + 1:]
+		url = url[slash+1:]
 	}
 	dot := strings.Index(url, ".")
 	if dot > 0 {
