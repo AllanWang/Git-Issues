@@ -4,3 +4,5 @@ import:
   version: ^15.0.0
   subpackages:
   - github
+- package: gopkg.in/src-d/go-git.v4
+  version: ^4.1.0
