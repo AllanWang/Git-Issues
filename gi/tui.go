@@ -11,7 +11,7 @@ import (
 
 type Tui interface {
 	Gi
-	Log(msg string, a ... interface{})
+	Log(msg string)
 	Fetch() []*github.Issue
 	Run()
 	Stop()
@@ -20,7 +20,7 @@ type Tui interface {
 type tuiBase struct {
 	Gi
 	*tview.Application
-	logs *tview.TextView
+	logs *tview.InputField
 }
 
 type registration struct {
@@ -33,25 +33,38 @@ type registration struct {
 type issueList struct {
 	tuiBase
 	issues  *tview.List
-	content *tview.List
+	content *tview.TextView
 }
 
 func createTuiBase(config *Config) tuiBase {
-	return tuiBase{GetGi(config), tview.NewApplication(), tview.NewTextView(),}
+	return tuiBase{GetGi(config), tview.NewApplication(), tview.NewInputField(),}
 }
 
 func (tui tuiBase) eventCapture(event *tcell.EventKey) *tcell.EventKey {
-	switch event.Key() {
-	case tcell.KeyRune:
-		switch event.Rune() {
-		case 'q':
-			tui.Stop()
-			os.Exit(0)
-		default:
-			tui.Log(string(event.Rune()))
+	if event.Key() == tcell.KeyRune {
+		if !tui.logs.HasFocus() {
+			switch event.Rune() {
+			case 'i':
+				tui.SetFocus(tui.logs)
+				tui.logs.SetText("")
+				//tui.logs.Clear()
+				tui.Draw()
+				return nil
+			case 'q':
+				tui.Stop()
+			default:
+				tui.Log(string(event.Rune()))
+			}
 		}
-	default:
-		tui.Log(tcell.KeyNames[event.Key()])
+	} else {
+		switch event.Key() {
+		case tcell.KeyCtrlC, tcell.KeyCtrlZ:
+			tui.Stop()
+		default:
+			if !tui.logs.HasFocus() {
+				tui.Log(tcell.KeyNames[event.Key()])
+			}
+		}
 	}
 
 	return event
@@ -72,7 +85,7 @@ func getGithubToken(base tuiBase) {
 	}
 	tui.input.SetText("Token").SetAcceptanceFunc(func(textToCheck string, lastChar rune) bool {
 		if base.SetGithubToken(textToCheck) {
-			tui.Stop()
+			tui.Application.Stop()
 		}
 		return true
 	})
@@ -81,7 +94,38 @@ func getGithubToken(base tuiBase) {
 		AddItem(tui.input, 0, 1, false).
 		AddItem(tui.link, 0, 1, true).
 		AddItem(tui.logs, 1, 1, false)
+	flex.SetBackgroundColor(tcell.ColorBlack)
 	tui.SetRoot(flex, true).SetInputCapture(tui.eventCapture).Run()
+}
+
+func theme(box *tview.Box) *tview.Box {
+	box.SetBackgroundColor(tcell.ColorBlack).
+		SetBorderColor(tcell.ColorGray).
+		SetTitleColor(tcell.ColorWhite)
+	return box
+}
+
+func themeText(view *tview.TextView) *tview.TextView {
+	view.SetTextColor(tcell.ColorWhite).
+		SetTitleColor(tcell.ColorWhite)
+	return view
+}
+
+func themeInput(view *tview.InputField) *tview.InputField {
+	view.SetFieldTextColor(tcell.ColorWhite).
+		SetBackgroundColor(tcell.ColorBlack).
+		SetTitleColor(tcell.ColorWhite)
+	return view
+}
+
+func themeList(l *tview.List) *tview.List {
+	l.SetMainTextColor(tcell.ColorWhite).
+		SetSecondaryTextColor(tcell.ColorGray).
+		SetSelectedBackgroundColor(tcell.ColorDarkGray).
+		SetSelectedTextColor(tcell.ColorWhite).
+		SetTitleColor(tcell.ColorWhite).
+		SetBackgroundColor(tcell.ColorBlack)
+	return l
 }
 
 func CreateIssueListView() Tui {
@@ -89,10 +133,42 @@ func CreateIssueListView() Tui {
 	if base.GetClient() == nil {
 		getGithubToken(base)
 	}
-	tui := issueList{base, tview.NewList(), tview.NewList()}
-	tui.issues.SetBorder(true).SetTitle("Issues")
-	tui.content.SetBorder(true).SetTitle("Content")
-	tui.logs.SetTextColor(tcell.ColorWhite).SetBorder(false).SetBorderPadding(0, 0, 1, 1)
+	tui := issueList{base, tview.NewList(), tview.NewTextView()}
+	tui.issues.ShowSecondaryText(false).SetBorder(true).SetTitle("Issues").
+		SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyLeft:
+			return nil
+		case tcell.KeyRight:
+			tui.SetFocus(tui.content)
+			return nil
+		}
+		return event
+	})
+	tui.content.SetScrollable(true).SetBorder(true).
+		SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyLeft:
+			tui.SetFocus(tui.issues)
+			return nil
+		case tcell.KeyRight:
+			return nil
+		}
+		return event
+	})
+	tui.logs.SetBorder(false).SetBorderPadding(0, 0, 1, 1).
+		SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEsc:
+			tui.SetFocus(tui.issues)
+			return nil
+		}
+		return event
+	})
+
+	themeList(tui.issues)
+	themeText(tui.content)
+	themeInput(tui.logs)
 
 	flex := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(tview.NewFlex().SetDirection(tview.FlexColumn).
@@ -100,7 +176,9 @@ func CreateIssueListView() Tui {
 		AddItem(tui.content, 0, 3, false), 0, 1, false).
 		AddItem(tui.logs, 1, 1, false)
 
-	tui.SetRoot(flex, true).SetInputCapture(tui.eventCapture).SetFocus(flex)
+	theme(flex.Box)
+
+	tui.SetRoot(flex, true).SetInputCapture(tui.eventCapture).SetFocus(tui.issues)
 	return tui
 }
 
@@ -110,12 +188,8 @@ func CreateIssueListView() Tui {
  * -------------------------------------
  */
 
-func (tui tuiBase) Log(format string, a ... interface{}) {
-	if len(a) == 0 {
-		tui.logs.SetText(format)
-	} else {
-		tui.logs.SetText(fmt.Sprintf(format, a))
-	}
+func (tui tuiBase) Log(format string) {
+	tui.logs.SetText(format)
 }
 
 func (tui tuiBase) Run() {
@@ -125,6 +199,11 @@ func (tui tuiBase) Run() {
 	}
 }
 
+func (tui tuiBase) Stop() {
+	tui.Application.Stop()
+	os.Exit(0)
+}
+
 /*
  * -------------------------------------
  * IssueList
@@ -132,9 +211,9 @@ func (tui tuiBase) Run() {
  */
 
 func (tui issueList) Fetch() []*github.Issue {
-	project, err := tui.GetProjectName()
-	if err != nil {
-		tui.Log("Error: %s", err)
+	project := tui.GetProjectName()
+	if project == nil {
+		tui.Log("No project found")
 		return []*github.Issue{}
 	}
 	client := tui.GetClient()
@@ -143,27 +222,26 @@ func (tui issueList) Fetch() []*github.Issue {
 		return []*github.Issue{}
 	}
 	issues, _, err := client.Issues.
-		ListByRepo(tui.Ctx(), *tui.GetUserName(), project, nil)
+		ListByRepo(tui.Ctx(), *tui.GetUserName(), *project, nil)
 	if err != nil {
-		tui.Log("Error %s: %s", project, err)
+		tui.Log(fmt.Sprintf("Error %s: %s", *project, err))
 		return []*github.Issue{}
 	}
 	tui.issues.Clear()
-	for i, issue := range issues {
-		var key rune
-		if i < 10 {
-			key = rune(i)
-		} else {
-			key = 0
+	if len(issues) > 0 {
+		for _, issue := range issues {
+			tui.issues.AddItem(*issue.Title, "", 0, nil)
 		}
-		tui.issues.AddItem(*issue.Title, *issue.User.Name, key, func() {
-			tui.showIssue(issue)
-		})
+	} else {
+		tui.issues.AddItem("No issues found", "", 0, nil)
 	}
-	tui.Log("Done %d", len(issues))
+	tui.issues.SetChangedFunc(func(i int, _ string, _ string, _ rune) {
+		tui.showIssue(issues[i])
+	})
+	tui.Log(fmt.Sprintf("Done %d %s", len(issues), *tui.GetProjectName()))
 	return issues
 }
 
-func(tui issueList) showIssue(issue *github.Issue) {
-
+func (tui issueList) showIssue(issue *github.Issue) {
+	tui.content.SetText(*issue.Body)
 }

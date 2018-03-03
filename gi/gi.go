@@ -24,7 +24,7 @@ type gi struct {
 }
 
 func GetGi(config *Config) Gi {
-	gi := gi{GetProjectWd(), nil, config,
+	gi := gi{GetCurrentProject(), nil, config,
 		nil, context.Background()}
 	gi.updateGithubClient()
 	return gi

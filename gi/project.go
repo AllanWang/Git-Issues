@@ -1,35 +1,30 @@
 package gi
 
 import (
-	"fmt"
 	"os"
 	"gopkg.in/src-d/go-git.v4"
-	"errors"
 	"strings"
-	"gopkg.in/src-d/go-billy.v4/helper/chroot"
-	"gopkg.in/src-d/go-git.v4/storage/filesystem"
-	"path"
 )
 
 type Project interface {
-	GetProjectName() (string, error)
-	GetRepository() *git.Repository
+	GetProjectName() *string
 }
 
 type project struct {
 	*git.Repository
+	name *string
 }
 
-var (
-	ErrAmbiguousProjectName = errors.New("ambiguous project name; multiple remotes found")
-	ErrNoRemote             = errors.New("no remote found")
-)
-
-// Instantiate Project from working directory
-func GetProjectWd() Project {
+// Instantiate Project from working directory, or the supplied path
+func GetCurrentProject() Project {
+	if len(os.Args) > 1 {
+		_, err := os.Stat(os.Args[1])
+		if !os.IsNotExist(err) {
+			return GetProject(os.Args[1])
+		}
+	}
 	dir, err := os.Getwd()
 	if err != nil {
-		fmt.Printf("Could not open working directory")
 		return nil
 	}
 	return GetProject(dir)
@@ -37,59 +32,26 @@ func GetProjectWd() Project {
 
 // Instantiate Project from path
 func GetProject(path string) Project {
-	r, err := git.PlainOpen(path)
-	if err == git.ErrRepositoryNotExists {
-		fmt.Printf("No repo found at %s\n", path)
+	r, _ := git.PlainOpen(path)
+	if r == nil {
 		return nil
 	}
-	if err != nil {
-		fmt.Printf("An error occurred: %s\n", err.Error())
+	remotes, _ := r.Remotes()
+	if len(remotes) == 0 {
 		return nil
 	}
-	return project{r}
+	for _, url := range remotes[0].Config().URLs {
+		if strings.Contains(url, "github") {
+			name := GetNameFromUrl(url)
+			if name != nil {
+				return project{r, name}
+			}
+		}
+	}
+	return nil
 }
 
-func (g project) GetRepository() *git.Repository {
-	return g.Repository
-}
-
-// Attempts to retrieve the git parent directory
-// Falls back to prettified remote name
-func (g project) GetProjectName() (string, error) {
-	// Try to grab the repository Storer
-	s, ok := g.Storer.(*filesystem.Storage)
-	if !ok {
-		return g.getRemoteName()
-	}
-
-	// Try to get the underlying billy.Filesystem
-	fs, ok := s.Filesystem().(*chroot.ChrootHelper)
-	if !ok {
-		return g.getRemoteName()
-	}
-	name := path.Base(path.Dir(fs.Root()))
-	return name, nil
-}
-
-// Attempts to retrieve a remote name
-func (g project) getRemoteName() (string, error) {
-	remotes, err := g.Remotes()
-	if err != nil {
-		return "", err
-	}
-	switch len(remotes) {
-	case 0:
-		return "", ErrNoRemote
-	case 1:
-		remote := remotes[0].Config().URLs[0]
-		return nameFromUrl(remote), nil
-	default:
-		return "", ErrAmbiguousProjectName
-	}
-}
-
-// Trim url to get last segment before extensions
-func nameFromUrl(url string) string {
+func GetNameFromUrl(url string) *string {
 	slash := strings.LastIndex(url, "/")
 	if slash > 0 {
 		url = url[slash+1:]
@@ -98,5 +60,9 @@ func nameFromUrl(url string) string {
 	if dot > 0 {
 		url = url[:dot]
 	}
-	return url
+	return &url
+}
+
+func (p project) GetProjectName() *string {
+	return p.name
 }
