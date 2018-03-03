@@ -1,93 +1,78 @@
 package gi
 
 import (
-	"fmt"
-	"os"
-	"gopkg.in/src-d/go-git.v4"
-	"errors"
-	"strings"
-	"gopkg.in/src-d/go-billy.v4/helper/chroot"
-	"gopkg.in/src-d/go-git.v4/storage/filesystem"
-	"path"
+	"github.com/google/go-github/github"
+	"golang.org/x/oauth2"
+	"context"
 )
 
-type Gi struct {
-	git.Repository
+type Gi interface {
+	Project
+	SetGithubToken(token string) bool
+	GetUserName() *string
+	GetClient() *github.Client
+	GetConfig() *Config
+	Ctx() context.Context
 }
 
-var (
-	ErrAmbiguousProjectName = errors.New("ambiguous project name; multiple remotes found")
-	ErrNoRemote             = errors.New("no remote found")
-)
-
-// Instantiate Gi from working directory
-func GetGitWd() *Gi {
-	dir, err := os.Getwd()
-	if err != nil {
-		fmt.Printf("Could not open working directory")
-		return nil
-	}
-	return GetGit(dir)
+type gi struct {
+	Project
+	user         *github.User
+	config       *Config
+	githubClient *github.Client
+	ctx      context.Context
 }
 
-// Instantiate Gi from path
-func GetGit(path string) *Gi {
-	r, err := git.PlainOpen(path)
-	if err == git.ErrRepositoryNotExists {
-		fmt.Printf("No repo found at %s\n", path)
-		return nil
-	}
-	if err != nil {
-		fmt.Printf("An error occurred: %s\n", err.Error())
-		return nil
-	}
-	return &Gi{*r}
+func GetGi(config *Config) Gi {
+	gi := gi{GetProjectWd(), nil, config,
+		nil, context.Background()}
+	gi.updateGithubClient()
+	return gi
 }
 
-// Attempts to retrieve the git parent directory
-// Falls back to prettified remote name
-func (g Gi) GetProjectName() (string, error) {
-	// Try to grab the repository Storer
-	s, ok := g.Storer.(*filesystem.Storage)
-	if !ok {
-		return g.getRemoteName()
+func (gi *gi) updateGithubClient() bool {
+	token := gi.config.GithubToken
+	if token == "" {
+		return false
 	}
+	ts := oauth2.StaticTokenSource(
+		&oauth2.Token{AccessToken: token},
+	)
+	tc := oauth2.NewClient(gi.ctx, ts)
 
-	// Try to get the underlying billy.Filesystem
-	fs, ok := s.Filesystem().(*chroot.ChrootHelper)
-	if !ok {
-		return g.getRemoteName()
+	client := github.NewClient(tc)
+	user, _, _ := client.Users.Get(gi.ctx, "")
+	if user == nil {
+		return false
 	}
-	name := path.Base(path.Dir(fs.Root()))
-	return name, nil
+	gi.user = user
+	gi.githubClient = client
+	return true
 }
 
-// Attempts to retrieve a remote name
-func (g Gi) getRemoteName() (string, error) {
-	remotes, err := g.Remotes()
-	if err != nil {
-		return "", err
-	}
-	switch len(remotes) {
-	case 0:
-		return "", ErrNoRemote
-	case 1:
-		remote := remotes[0].Config().URLs[0]
-		return nameFromUrl(remote), nil
-	default:
-		return "", ErrAmbiguousProjectName
-	}
+func (gi gi) SetGithubToken(token string) bool {
+	gi.config.GithubToken = token
+	gi.config.Save()
+	return gi.updateGithubClient()
 }
 
-// Trim url to get last segment before extensions
-func nameFromUrl(url string) string {
-	slash := strings.LastIndex(url, "/")
-	if slash > 0 {
-		url = url[slash+1:]
-	}
-	dot := strings.Index(url, ".")
-	if dot > 0 {
-		url = url[:dot]
-	}
-	return url
+func (gi gi) GetUserName() *string {
+	return gi.user.Login
+}
+
+func (gi gi) GetClient() *github.Client {
+	return gi.githubClient
+}
+
+func (gi gi) GetConfig() *Config {
+	return gi.config
+}
+
+func (gi gi) Ctx() context.Context {
+	return gi.ctx
+}
+
+func (gi gi) GetUser() *github.User {
+	user, _, _ := gi.githubClient.Users.Get(gi.ctx, "")
+	return user
 }

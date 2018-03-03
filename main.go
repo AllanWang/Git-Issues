@@ -1,19 +1,15 @@
 package main
 
 import (
-	"./gi"
-	"os"
+	"github.com/allanwang/git-issues/gi"
 	"fmt"
 )
 
 func main() {
-	r := gi.GetGitWd()
-	if r == nil {
-		fmt.Println("Could not get git instance")
-		os.Exit(-1)
+	tui := gi.CreateIssueListView()
+	data := tui.Fetch()
+	for _, issue := range data {
+		fmt.Println(issue.Body)
 	}
-	name, _ := r.GetProjectName()
-	fmt.Printf("Welcome to %s\n", name)
-	head, _ := r.Head()
-	fmt.Println(head.String())
+	tui.Run()
 }

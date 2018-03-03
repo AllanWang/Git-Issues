@@ -1,4 +1,4 @@
-package: .
+package: github.com/AllanWang/Git-Issues
 import:
 - package: github.com/google/go-github
   version: ^15.0.0
@@ -6,3 +6,4 @@ import:
   - github
 - package: gopkg.in/src-d/go-git.v4
   version: ^4.1.0
+- package: github.com/rivo/tview
